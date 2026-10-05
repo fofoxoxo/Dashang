@@ -11,9 +11,13 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -63,9 +67,12 @@ fun DashangScreen(
 ) {
     val game = state.game
     Column(
-        modifier = modifier.fillMaxSize().padding(12.dp),
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         PlayerPanel(PieceColor.BLACK, game)
         DashangBoard(
@@ -75,7 +82,31 @@ fun DashangScreen(
         )
         PlayerPanel(PieceColor.WHITE, game)
         StatusBadge(game, state.isBotThinking)
-        Button(onClick = { onIntent(GameIntent.NewGame) }) { Text("New Game") }
+        state.hint?.let {
+            Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.tertiary)
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("vs", fontSize = 13.sp)
+            Opponent.values().forEach { opp ->
+                FilterChip(
+                    selected = state.opponent == opp,
+                    onClick = { onIntent(GameIntent.SetOpponent(opp)) },
+                    label = { Text(opp.label, fontSize = 12.sp) }
+                )
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(
+                onClick = { onIntent(GameIntent.Undo) },
+                enabled = state.canUndo
+            ) { Text("Undo") }
+            Button(onClick = { onIntent(GameIntent.NewGame) }) { Text("New Game") }
+        }
     }
 }
 
@@ -129,7 +160,7 @@ private fun StatusBadge(game: GameState, botThinking: Boolean) {
         GameStatus.STALEMATE -> "Stalemate. Draw."
         GameStatus.ACTIVE ->
             (if (game.inCheck) "Check! " else "") +
-                "${game.turn.displayName} to move" + if (botThinking) " (thinking...)" else ""
+                "${game.turn.displayName} to move" + if (botThinking) " (AI thinking...)" else ""
     }
     Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
         Text(
@@ -195,8 +226,8 @@ fun DashangBoard(
             drawPiece(paint, piece, center(Position.fromIndex(i)), cell, game.cooldowns.remaining(piece))
         }
 
-        // 3) legal-target markers on top
-        for (m in state.movesFromSelected) {
+        // 3) legal-target markers on top (normal mode or swap mode)
+        for (m in state.visibleMoves) {
             val c = center(m.to)
             val occupied = game.pieceAt(m.to) != null
             when {
