@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashang (दशांग) - 10x10 Strategy Chess</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --panel-bg: #1e1e2c;
+            --light-square: #C3C7DB;
+            --dark-square: #4E5D6C;
+            --selected-square: #E0A96D;
+            --accent-color: #4ECCA3;
+            --danger-color: #F28482;
+            --text-color: #FFFFFF;
+        }
+
+        body {
+            margin: 0;
+            padding: 10px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 95vh;
+        }
+
+        /* Top Header */
+        header {
+            width: 100%;
+            max-width: 500px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--panel-bg);
+            padding: 10px 15px;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.2rem;
+            color: var(--accent-color);
+        }
+
+        button.btn {
+            background: #4A4E69;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        /* Game Status Banner */
+        .status-banner {
+            width: 100%;
+            max-width: 500px;
+            margin: 8px 0;
+            background: var(--panel-bg);
+            padding: 8px 12px;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            box-sizing: border-box;
+        }
+
+        /* 10x10 Board Grid */
+        #board-container {
+            width: 100%;
+            max-width: 500px;
+            aspect-ratio: 1 / 1;
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            grid-template-rows: repeat(10, 1fr);
+            border: 3px solid #9A8C98;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .square {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            user-select: none;
+            cursor: pointer;
+        }
+
+        .square.light { background-color: var(--light-square); }
+        .square.dark { background-color: var(--dark-square); }
+        .square.selected { background-color: var(--selected-square) !important; }
+
+        /* Custom Vector Icons Styling */
+        .piece-icon {
+            width: 80%;
+            height: 80%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Systematically Arranged Buttons */
+        .controls {
+            width: 100%;
+            max-width: 500px;
+            display: flex;
+            justify-content: space-around;
+            margin-top: 10px;
+        }
+
+        .btn-danger { background-color: var(--danger-color) !important; }
+        .btn-secondary { background-color: #C9ADA7 !important; color: #000 !important; }
+
+        /* Rules Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        .modal-content {
+            background: var(--panel-bg);
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 400px;
+            width: 90%;
+            line-height: 1.5;
+        }
+
+        .modal-content h2 { margin-top: 0; color: var(--accent-color); }
+        .close-btn { float: right; cursor: pointer; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>DASHANG (दशांग)</h1>
+        <button class="btn" onclick="toggleModal(true)">📖 Rules</button>
+    </header>
+
+    <div class="status-banner">
+        <span id="turn-display">Turn: WHITE</span>
+        <span id="cooldown-display">A-CD: 0 | D-CD: 0</span>
+    </div>
+
+    <div id="board-container"></div>
+
+    <div class="controls">
+        <button class="btn btn-secondary" onclick="deselect()">Deselect</button>
+        <button class="btn btn-danger" onclick="resetGame()">Reset Game</button>
+    </div>
+
+    <!-- Rules Modal -->
+    <div id="rules-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="toggleModal(false)">&times;</span>
+            <h2>Dashang Game Rules</h2>
+            <p><strong>🤠 Agent (A):</strong> Swaps position with own Rook, Knight, or Bishop. Immune to standard captures (except Pawns & King). Cooldown: 5 turns.</p>
+            <p><strong>🧱 Democrat (D):</strong> Teleports to any empty square. Immune to standard captures (except Pawns & King). Cooldown: 5 turns.</p>
+            <p><strong>♟️ Pawns:</strong> Can capture Agent & Democrat straight forward as well as diagonally.</p>
+        </div>
+    </div>
+
+    <script>
+        const BOARD_SIZE = 10;
+        let board = [];
+        let currentTurn = 'WHITE';
+        let selectedSquare = null;
+        let agentCooldown = 0;
+        let democratCooldown = 0;
+
+        // Custom Piece Displays (Using Vector/Emoji representation)
+        const PIECES = {
+            'W_A': '🤠', 'W_D': '🧱', 'W_K': '♔', 'W_Q': '♕', 'W_R': '♖', 'W_B': '♗', 'W_N': '♘', 'W_P': '♙',
+            'B_A': '🤠', 'B_D': '🧱', 'B_K': '♚', 'B_Q': '♛', 'B_R': '♜', 'B_B': '♝', 'B_N': '♞', 'B_P': '♟'
+        };
+
+        function initBoard() {
+            board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+
+            // Back Ranks
+            const setup = ['A', 'R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R', 'D'];
+            for (let c = 0; c < 10; c++) {
+                board[0][c] = 'B_' + setup[c];
+                board[1][c] = 'B_P';
+                board[8][c] = 'W_P';
+                board[9][c] = 'W_' + setup[c];
+            }
+            renderBoard();
+        }
+
+        function renderBoard() {
+            const container = document.getElementById('board-container');
+            container.innerHTML = '';
+
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const square = document.createElement('div');
+                    const isDark = (r + c) % 2 === 1;
+                    square.className = `square ${isDark ? 'dark' : 'light'}`;
+                    
+                    if (selectedSquare && selectedSquare.r === r && selectedSquare.c === c) {
+                        square.classList.add('selected');
+                    }
+
+                    const pieceCode = board[r][c];
+                    if (pieceCode) {
+                        square.innerText = PIECES[pieceCode] || '';
+                        // Color differentiation for special pieces
+                        if (pieceCode.startsWith('W')) square.style.color = '#FFF';
+                        else square.style.color = '#000';
+                    }
+
+                    square.onclick = () => handleSquareClick(r, c);
+                    container.appendChild(square);
+                }
+            }
+
+            document.getElementById('turn-display').innerText = `Turn: ${currentTurn}`;
+            document.getElementById('cooldown-display').innerText = `A-CD: ${agentCooldown} | D-CD: ${democratCooldown}`;
+        }
+
+        function handleSquareClick(r, c) {
+            if (!selectedSquare) {
+                if (board[r][c] && board[r][c].startsWith(currentTurn[0])) {
+                    selectedSquare = { r, c };
+                }
+            } else {
+                // Execute basic move
+                board[r][c] = board[selectedSquare.r][selectedSquare.c];
+                board[selectedSquare.r][selectedSquare.c] = null;
+                selectedSquare = null;
+                currentTurn = currentTurn === 'WHITE' ? 'BLACK' : 'WHITE';
+            }
+            renderBoard();
+        }
+
+        function deselect() {
+            selectedSquare = null;
+            renderBoard();
+        }
+
+        function resetGame() {
+            currentTurn = 'WHITE';
+            selectedSquare = null;
+            initBoard();
+        }
+
+        function toggleModal(show) {
+            document.getElementById('rules-modal').style.display = show ? 'flex' : 'none';
+        }
+
+        // Initialize game on page load
+        initBoard();
+    </script>
+</body>
+</html>
