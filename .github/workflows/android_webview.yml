@@ -7,7 +7,7 @@ on:
   pull_request:
     branches:
       - main
-  workflow_dispatch: # Manual trigger ke liye option
+  workflow_dispatch:
 
 jobs:
   build:
@@ -27,9 +27,10 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      # 3. Android SDK Setup
-      - name: Setup Android SDK
-        uses: actions/setup-android@v3
+      # 3. Setup Android SDK Environment Path (Fix for missing action)
+      - name: Setup Android SDK Path
+        run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
 
       # 4. Gradle Executable Permissions
       - name: Grant Execute Permission for Gradlew
