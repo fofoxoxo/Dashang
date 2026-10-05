@@ -1,187 +1,79 @@
 package com.dashang.game.model
 
-import kotlin.math.abs
+const val BOARD_SIZE = 10
+const val ABILITY_COOLDOWN_TURNS = 5
 
-// 1. Piece Types & Colors
-enum class PieceColor { WHITE, BLACK }
+enum class PieceColor(val displayName: String) {
+    WHITE("White"),
+    BLACK("Black");
 
-enum class PieceType(val code: String) {
-    PAWN("P"),
-    ROOK("R"),
-    KNIGHT("N"),
-    BISHOP("B"),
-    QUEEN("Q"),
-    KING("K"),
-    AGENT("A"),       // Special Unit (Corner)
-    DEMOCRAT("D")     // Special Unit (Corner)
+    val opposite: PieceColor get() = if (this == WHITE) BLACK else WHITE
+    val pawnDirection: Int get() = if (this == WHITE) 1 else -1
+    val pawnStartRank: Int get() = if (this == WHITE) 1 else BOARD_SIZE - 2
+    val promotionRank: Int get() = if (this == WHITE) BOARD_SIZE - 1 else 0
 }
 
-data class Piece(
-    val type: PieceType,
-    val color: PieceColor
-)
+enum class PieceType(val symbol: String, val value: Int) {
+    PAWN("P", 100),
+    KNIGHT("N", 320),
+    BISHOP("B", 330),
+    ROOK("R", 500),
+    QUEEN("Q", 900),
+    KING("K", 0),
+    AGENT("A", 350),
+    DEMOCRAT("D", 350);
 
-data class Position(val row: Int, val col: Int)
+    val isSpecial: Boolean get() = this == AGENT || this == DEMOCRAT
+}
 
-// 2. Cooldown State Tracker (5-Move Rule)
-data class CooldownState(
-    val whiteAgent: Int = 0,
-    val whiteDemocrat: Int = 0,
-    val blackAgent: Int = 0,
-    val blackDemocrat: Int = 0
-)
+data class Piece(val type: PieceType, val color: PieceColor)
 
-// 3. Game Board Engine State
-class DashangEngine {
-    val board = Array(10) { Array<Piece?>(10) { null } }
-    var turn = PieceColor.WHITE
-    var cooldowns = CooldownState()
+/** file 0..9 = a..j, rank 0..9 = rank 1..10. */
+data class Position(val file: Int, val rank: Int) {
+    val isValid: Boolean get() = file in 0 until BOARD_SIZE && rank in 0 until BOARD_SIZE
+    val index: Int get() = rank * BOARD_SIZE + file
 
-    init {
-        setupBoard()
+    fun offset(df: Int, dr: Int) = Position(file + df, rank + dr)
+
+    override fun toString() = "${'a' + file}${rank + 1}"
+
+    companion object {
+        fun fromIndex(i: Int) = Position(i % BOARD_SIZE, i / BOARD_SIZE)
     }
+}
 
-    private fun setupBoard() {
-        // Black Back-Rank (Row 0)
-        board[0][0] = Piece(PieceType.AGENT, PieceColor.BLACK)
-        board[0][1] = Piece(PieceType.ROOK, PieceColor.BLACK)
-        board[0][2] = Piece(PieceType.KNIGHT, PieceColor.BLACK)
-        board[0][3] = Piece(PieceType.BISHOP, PieceColor.BLACK)
-        board[0][4] = Piece(PieceType.QUEEN, PieceColor.BLACK)
-        board[0][5] = Piece(PieceType.KING, PieceColor.BLACK)
-        board[0][6] = Piece(PieceType.BISHOP, PieceColor.BLACK)
-        board[0][7] = Piece(PieceType.KNIGHT, PieceColor.BLACK)
-        board[0][8] = Piece(PieceType.ROOK, PieceColor.BLACK)
-        board[0][9] = Piece(PieceType.DEMOCRAT, PieceColor.BLACK)
+typealias Board = List<Piece?>
 
-        // Black Pawns (Row 1)
-        for (col in 0..9) board[1][col] = Piece(PieceType.PAWN, PieceColor.BLACK)
+/**
+ * Ability cooldowns, keyed by the special piece (each side has exactly one Agent and one Democrat).
+ * A value N means "N more of this player's turns must pass before the ability is usable again".
+ */
+data class CooldownState(val turns: Map<Piece, Int> = emptyMap()) {
+    fun remaining(piece: Piece): Int = turns[piece] ?: 0
+    fun isReady(piece: Piece): Boolean = remaining(piece) == 0
 
-        // White Pawns (Row 8)
-        for (col in 0..9) board[8][col] = Piece(PieceType.PAWN, PieceColor.WHITE)
+    /** Called when [color] finishes a turn. */
+    fun tick(color: PieceColor): CooldownState = CooldownState(
+        turns.mapValues { (p, v) -> if (p.color == color && v > 0) v - 1 else v }
+    )
 
-        // White Back-Rank (Row 9)
-        board[9][0] = Piece(PieceType.AGENT, PieceColor.WHITE)
-        board[9][1] = Piece(PieceType.ROOK, PieceColor.WHITE)
-        board[9][2] = Piece(PieceType.KNIGHT, PieceColor.WHITE)
-        board[9][3] = Piece(PieceType.BISHOP, PieceColor.WHITE)
-        board[9][4] = Piece(PieceType.QUEEN, PieceColor.WHITE)
-        board[9][5] = Piece(PieceType.KING, PieceColor.WHITE)
-        board[9][6] = Piece(PieceType.BISHOP, PieceColor.WHITE)
-        board[9][7] = Piece(PieceType.KNIGHT, PieceColor.WHITE)
-        board[9][8] = Piece(PieceType.ROOK, PieceColor.WHITE)
-        board[9][9] = Piece(PieceType.DEMOCRAT, PieceColor.WHITE)
-    }
+    fun start(piece: Piece, duration: Int = ABILITY_COOLDOWN_TURNS): CooldownState =
+        CooldownState(turns + (piece to duration))
+}
 
-    // Move Validation Logic
-    fun isValidMove(from: Position, to: Position): Boolean {
-        val piece = board[from.row][from.col] ?: return false
-        if (piece.color != turn) return false
-        val target = board[to.row][to.col]
+enum class MoveKind { STEP, SWAP, TELEPORT }
 
-        // Target cannot be own piece (Except Agent Swap)
-        if (target != null && target.color == piece.color && piece.type != PieceType.AGENT) return false
+data class Move(val from: Position, val to: Position, val kind: MoveKind = MoveKind.STEP)
 
-        return when (piece.type) {
-            PieceType.PAWN -> validatePawnMove(from, to, piece.color, target)
-            PieceType.DEMOCRAT -> validateDemocratMove(to, piece.color)
-            PieceType.AGENT -> validateAgentSwap(from, to, piece.color)
-            else -> validateStandardCaptureRestrictions(target)
-        }
-    }
+enum class GameStatus { ACTIVE, WHITE_WINS, BLACK_WINS, STALEMATE }
 
-    private fun validatePawnMove(from: Position, to: Position, color: PieceColor, target: Piece?): Boolean {
-        val direction = if (color == PieceColor.WHITE) -1 else 1
-        val rowDiff = to.row - from.row
-        val colDiff = abs(to.col - from.col)
-
-        // Regular 1-step forward
-        if (colDiff == 0 && rowDiff == direction && target == null) return true
-
-        // Standard Diagonal Capture
-        if (colDiff == 1 && rowDiff == direction && target != null) {
-            // Special Units are IMMUNE to Rook/Knight/Bishop/Queen, but CAN be captured by Pawn/King
-            return true
-        }
-
-        // DUAL ATTACK VECTOR: Pawn straight elimination for Democrat & Agent
-        if (colDiff == 0 && rowDiff == direction && target != null) {
-            return target.type == PieceType.DEMOCRAT || target.type == PieceType.AGENT
-        }
-
-        return false
-    }
-
-    private fun validateDemocratMove(to: Position, color: PieceColor): Boolean {
-        val currentCooldown = if (color == PieceColor.WHITE) cooldowns.whiteDemocrat else cooldowns.blackDemocrat
-        if (currentCooldown > 0) return false
-
-        // Democrat CANNOT capture direct, lands only on EMPTY squares
-        return board[to.row][to.col] == null
-    }
-
-    private fun validateAgentSwap(from: Position, to: Position, color: PieceColor): Boolean {
-        val currentCooldown = if (color == PieceColor.WHITE) cooldowns.whiteAgent else cooldowns.blackAgent
-        if (currentCooldown > 0) return false
-
-        val target = board[to.row][to.col] ?: return false
-        
-        // Agent can SWAP ONLY with own Rook, Knight, or Bishop
-        if (target.color != color) return false
-        return target.type == PieceType.ROOK || target.type == PieceType.KNIGHT || target.type == PieceType.BISHOP
-    }
-
-    private fun validateStandardCaptureRestrictions(target: Piece?): Boolean {
-        if (target == null) return true
-        
-        // Democrat & Agent IMMUNITY: Regular pieces cannot capture them
-        if (target.type == PieceType.DEMOCRAT || target.type == PieceType.AGENT) {
-            return false // Only Pawns & King can eliminate special units
-        }
-        return true
-    }
-
-    fun makeMove(from: Position, to: Position) {
-        val piece = board[from.row][from.col] ?: return
-        val target = board[to.row][to.col]
-
-        // Handle Agent Swap
-        if (piece.type == PieceType.AGENT && target != null && target.color == piece.color) {
-            board[from.row][from.col] = target
-            board[to.row][to.col] = piece
-            resetAgentCooldown(piece.color)
-        } else {
-            // Handle Democrat Teleport
-            if (piece.type == PieceType.DEMOCRAT) {
-                resetDemocratCooldown(piece.color)
-            }
-            board[to.row][to.col] = piece
-            board[from.row][from.col] = null
-        }
-
-        decrementCooldowns()
-        turn = if (turn == PieceColor.WHITE) PieceColor.BLACK else PieceColor.WHITE
-    }
-
-    private fun resetAgentCooldown(color: PieceColor) {
-        cooldowns = if (color == PieceColor.WHITE) cooldowns.copy(whiteAgent = 5) else cooldowns.copy(blackAgent = 5)
-    }
-
-    private fun resetDemocratCooldown(color: PieceColor) {
-        cooldowns = if (color == PieceColor.WHITE) cooldowns.copy(whiteDemocrat = 5) else cooldowns.copy(blackDemocrat = 5)
-    }
-
-    private fun decrementCooldowns() {
-        if (turn == PieceColor.WHITE) {
-            cooldowns = cooldowns.copy(
-                whiteAgent = (cooldowns.whiteAgent - 1).coerceAtLeast(0),
-                whiteDemocrat = (cooldowns.whiteDemocrat - 1).coerceAtLeast(0)
-            )
-        } else {
-            cooldowns = cooldowns.copy(
-                blackAgent = (cooldowns.blackAgent - 1).coerceAtLeast(0),
-                blackDemocrat = (cooldowns.blackDemocrat - 1).coerceAtLeast(0)
-            )
-        }
-    }
+data class GameState(
+    val board: Board,
+    val turn: PieceColor = PieceColor.WHITE,
+    val cooldowns: CooldownState = CooldownState(),
+    val status: GameStatus = GameStatus.ACTIVE,
+    val inCheck: Boolean = false,
+    val lastMove: Move? = null
+) {
+    fun pieceAt(pos: Position): Piece? = if (pos.isValid) board[pos.index] else null
 }
