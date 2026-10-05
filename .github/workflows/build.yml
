@@ -5,7 +5,7 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Direct manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   build:
@@ -21,13 +21,15 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Grant Execute Permission for Gradle Wrapper
-        run: chmod +x gradlew
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Generate Gradle Wrapper & Build APK
+        run: |
+          gradle wrapper
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
